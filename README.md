@@ -118,6 +118,87 @@ PowerMonitor/
 - **特权提升**：调用 `ExitWindowsEx` 前通过 `AdjustTokenPrivileges` 启用 `SeShutdownPrivilege`，并正确处理 `ERROR_NOT_ALL_ASSIGNED`
 - **线程安全**：事件经 `BeginInvoke` 入队更新 UI，避免在系统广播调用栈内重入；WMI 查询在后台线程执行
 
+## 架构原理
+
+### 组件结构
+
+隐藏消息窗口是整个监控的核心：Windows 电源管理器只会向窗口句柄投递 `WM_POWERBROADCAST`，程序用 `NativeWindow` 创建一个永不显示的窗口专门接收。
+
+```mermaid
+flowchart TB
+    subgraph OS["Windows 操作系统"]
+        BR["WM_POWERBROADCAST 广播<br/>(PBT_APMSUSPEND / PBT_APMRESUME* 等)"]
+        PSN["电源设置通知<br/>RegisterPowerSettingNotification<br/>(适配器/显示器/合盖 GUID)"]
+    end
+
+    subgraph APP["PowerMonitor 进程"]
+        MW["PowerMessageWindow<br/>隐藏消息窗口 (NativeWindow)"]
+        WP["WndProc 窗口过程<br/>解析 wParam / POWERBROADCAST_SETTING"]
+        SVC["PowerStateService<br/>事件分发 + GetSystemPowerStatus 快照"]
+        UI["MainForm (UI 线程)<br/>BeginInvoke 队列 → 状态面板 / 日历 / 托盘气泡"]
+        BAT["BatteryQueryService<br/>WMI 电池详情 (后台线程)"]
+    end
+
+    BR --> MW
+    PSN --> MW
+    MW --> WP
+    WP -->|"PBT_APM*：直接映射事件类型"| SVC
+    WP -->|"PBT_POWERSETTINGCHANGE：按 GUID 识别 + 读取 DWORD 值"| SVC
+    SVC -->|"BeginInvoke 入队，避免广播栈内重入"| UI
+    UI -->|"适配器拔出时触发"| BAT
+```
+
+### 事件流时序（一次典型睡眠-唤醒循环）
+
+```mermaid
+sequenceDiagram
+    participant OS as Windows 电源管理器
+    participant W as 隐藏消息窗口
+    participant S as PowerStateService
+    participant F as MainForm (UI)
+
+    OS->>W: PBT_APMQUERYSUSPEND（询问是否允许睡眠）
+    W->>S: QuerySuspend → 默认允许
+    OS->>W: PBT_APMSUSPEND（即将进入睡眠）
+    W->>S: Suspend → BeginInvoke
+    F->>F: 日志记录，进程冻结
+    Note over OS,F: …… 系统睡眠中（RTC 定时器/用户操作唤醒）……
+    OS->>W: PBT_APMRESUMEAUTOMATIC（自动唤醒）
+    W->>S: ResumeAutomatic → BeginInvoke
+    F->>F: 日志记录"系统已自动唤醒"
+    OS->>W: PBT_APMPOWERSTATUSCHANGE（供电状态刷新）
+    W->>S: PowerStatusChange → GetSystemPowerStatus
+    S->>F: BeginInvoke → 状态面板更新
+```
+
+### 关键设计点
+
+| 设计 | 说明 | 解决的问题 |
+|---|---|---|
+| BeginInvoke 入队 | 事件处理不直接在系统广播调用栈内执行 | 广播栈内重入 UI 导致死锁/卡顿 |
+| 订阅者异常隔离 | 窗口过程内 try/catch 包裹所有事件分发 | 单个事件处理失败拖垮整个进程 |
+| 注册失败即抛出 | `RegisterPowerSettingNotification` 返回 0 时抛带错误码异常 | 静默失效导致"永远收不到事件"难排查 |
+| 睡眠冻结无感知 | 进程随系统挂起，唤醒后窗口句柄与注册自动恢复 | 无需唤醒后重建监听，已实测验证 |
+
+## 更新日志
+
+### v1.0.0（2026-09-23）
+
+首个正式版本：
+
+- 事件驱动监听：适配器插拔、电池状态、显示器开关、合盖动作、睡眠/唤醒、低电量警告、挂起许可请求
+- 电池硬件详情检测（WMI：设计容量/满充容量/健康度/循环次数），适配器拔出自动触发
+- 系统电源操作：关机/重启/睡眠/休眠
+- 开机自启动（注册表 HKCU Run）
+- 系统托盘常驻 + 气泡通知、事件日志界面、文件诊断日志
+
+## Roadmap
+
+- [ ] 电池通讯异常预警：检测"插电却报告放电"、容量/电压为无效哨兵值等矛盾状态并红字告警
+- [ ] 更多电源设置 GUID：电源方案切换（`GUID_POWERSCHEME_PERSONALITY`）、电池充电状态、节能模式变化
+- [ ] 自包含发布：提供免装 .NET 运行时的 Release 附件
+- [ ] 多语言界面（英文）
+
 ## License
 
 MIT
