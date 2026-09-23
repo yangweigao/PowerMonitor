@@ -1,5 +1,10 @@
 # PowerMonitor — Windows 电源状态监控程序
 
+![Platform](https://img.shields.io/badge/platform-Windows%2010%20%2F%2011-blue)
+![.NET](https://img.shields.io/badge/.NET-10.0-purple)
+![License](https://img.shields.io/badge/license-MIT-green)
+![Release](https://img.shields.io/badge/release-v1.0.0-orange)
+
 基于 C# / .NET 10 WinForms 的 Windows 电源状态监控工具。**纯事件驱动**——通过 `WM_POWERBROADCAST` 消息与 `RegisterPowerSettingNotification` 订阅系统电源广播，无定时器轮询，状态变化实时推送。
 
 ![程序界面](docs/screenshot.png)
@@ -44,10 +49,43 @@
 - Windows 10 / 11（x64）
 - .NET 10 运行时（或使用自包含发布）
 
+## 下载安装
+
+前往 [Releases](https://github.com/yangweigao/PowerMonitor/releases) 下载 `PowerMonitor.exe`（约 516 KB 单文件），放到任意目录直接运行即可，无需安装。
+
+如需完全独立运行（目标机器无 .NET 10 运行时），可自行以自包含方式发布：
+
+```powershell
+dotnet publish -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -o publish
+```
+
+## 使用说明
+
+1. **启动监控**：程序启动后自动开始监听，状态面板显示当前供电方式、电池状态、剩余电量等
+2. **查看事件**：底部"事件日志"实时记录系统电源事件（系统推送，无轮询）
+3. **最小化到托盘**：点击窗口关闭按钮仅隐藏到系统托盘，后台持续监听；双击托盘图标恢复窗口，右键托盘可执行电源操作或退出
+4. **检测电池**：点击底部"检测电池"按钮查询电池硬件详情（设计容量、健康度、循环次数）；拔出适配器时也会自动检测
+5. **电源操作**：菜单栏"电源操作"或托盘右键，可执行睡眠/休眠/关机/重启（关机、重启有二次确认）
+6. **开机自启**：菜单栏"设置 → 开机自启动"勾选后，Windows 登录时自动运行
+
+## 常见问题
+
+**Q：台式机可以用吗？**
+可以。合盖事件仅笔记本有；没有电池的台式机，电池相关字段显示"未安装电池"，适配器插拔事件仍正常。
+
+**Q：电池显示容量正常，但拔掉适配器直接关机？**
+容量数字来自电池计量芯片的缓存，不代表电芯能实际放电。此现象多为电池保护板锁死或电芯老化失效（硬件问题），可尝试静电复位（长按电源键 30~60 秒）或联系售后检测电池。
+
+**Q：休眠选项报错？**
+系统可能未启用休眠，以管理员身份执行 `powercfg /hibernate on` 后重试。
+
+**Q：睡眠唤醒后监控会中断吗？**
+不会。程序在唤醒后会收到 `ResumeAutomatic`/`ResumeSuspend` 广播并继续正常监听，已实测验证。
+
 ## 构建与运行
 
 ```powershell
-# 调试运行
+# 克隆后调试运行
 dotnet run
 
 # 发布为单文件可执行程序（约 516 KB）
