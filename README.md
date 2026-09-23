@@ -2,6 +2,8 @@
 
 基于 C# / .NET 10 WinForms 的 Windows 电源状态监控工具。**纯事件驱动**——通过 `WM_POWERBROADCAST` 消息与 `RegisterPowerSettingNotification` 订阅系统电源广播，无定时器轮询，状态变化实时推送。
 
+![程序界面](docs/screenshot.png)
+
 ## 功能特性
 
 ### 事件监听
